@@ -23,6 +23,30 @@ chmod +x printdefaults.sh
 3. Choose layout and finishing options.
 4. Answer `y` to "Enable job accounting?" if wanted, then enter a user code.
 
+### Advanced mode (`-a`)
+
+```sh
+./printdefaults.sh -a
+```
+
+Without `-a` the script runs in easy mode (the simple menus above). With `-a`, the layout and finishing menus are replaced by a numbered list for each setting, built from the values the queue's PPD actually offers: duplex (long/short edge), color mode, staple (including position, e.g. top-right or 2 at left) and hole punch (e.g. 2 at top instead of 3 at left). Each list shows the PPD's human-readable labels, marks the **[current]** value and the easy-mode **[recommended]** value, and Enter keeps the "off" choice. For Canon, staple position and punch hole pattern are asked as a follow-up when stapling/punching is enabled. Scope selection and the accounting prompts work the same as in easy mode.
+
+## Output
+
+After the settings are applied, the script prints a summary:
+
+```
+Queue: zTest_Ricoh
+Color: mono
+Duplex: single
+Staple: none
+Punch: none
+Accounting: enabled
+Code: 12345
+```
+
+In advanced mode, staple and punch show the chosen position/pattern (e.g. `Staple: Top right`, `Punch: 2 at top`). Passwords are never printed.
+
 ## Global vs. per user
 
 | | Global | Per user |
@@ -50,4 +74,4 @@ User codes (and Sharp passwords) are stored in plain text in `~/.cups/lpoptions`
 
 ## Testing status
 
-Per-user mode was exercised against Canon, Ricoh, Kyocera and Sharp queues. Global mode (sudo/`lpadmin`) has not been run end to end. Option names come from vendor PPDs and may differ between driver versions, so try a test queue first.
+Per-user easy mode was exercised against Canon, Ricoh, Kyocera and Sharp queues, and advanced mode (`-a`) against Ricoh and Canon. Global mode (sudo/`lpadmin`) has not been run end to end. Option names come from vendor PPDs and may differ between driver versions, so try a test queue first.

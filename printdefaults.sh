@@ -7,7 +7,20 @@
 # Layout/finishing/accounting-enable can be applied globally (all users, via
 # lpadmin + sudo) or per user (~/.cups/lpoptions). The user code is ALWAYS
 # stored per user.
+#
+# Usage: printdefaults.sh [-a]
+#   (default)  easy mode: simple menus for layout, finishing and accounting
+#   -a         advanced mode: step through each setting and pick from the
+#              values the printer's PPD offers (staple position, punch type...)
 # ==============================================================================
+
+ADVANCED=0
+while getopts "ah" OPT; do
+    case "$OPT" in
+        a) ADVANCED=1 ;;
+        *) echo "Usage: $0 [-a]   (-a = advanced mode)"; exit 1 ;;
+    esac
+done
 
 # 1. DISCOVER AND SELECT PRINTER QUEUE
 echo "=================================================="
@@ -82,45 +95,186 @@ case "${SCOPE_IDX:-1}" in
     *) SCOPE="global" ;;
 esac
 
-# 3. SELECT CONFIGURATION COMBINATION (DEFAULT: SIMPLEX + MONO)
-echo ""
-echo "Select layout options (Default: [1] Simplex + Monochrome):"
-echo "  [1] Simplex / Monochrome"
-echo "  [2] Simplex / Color"
-echo "  [3] Duplex  / Monochrome"
-echo "  [4] Duplex  / Color"
-echo ""
+if [ "$ADVANCED" -eq 0 ]; then
+    # 3. SELECT CONFIGURATION COMBINATION (DEFAULT: SIMPLEX + MONO)
+    echo ""
+    echo "Select layout options (Default: [1] Simplex + Monochrome):"
+    echo "  [1] Simplex / Monochrome"
+    echo "  [2] Simplex / Color"
+    echo "  [3] Duplex  / Monochrome"
+    echo "  [4] Duplex  / Color"
+    echo ""
 
-read -p "Enter selection [1]: " LAYOUT_IDX
-LAYOUT_IDX=${LAYOUT_IDX:-1}
+    read -p "Enter selection [1]: " LAYOUT_IDX
+    LAYOUT_IDX=${LAYOUT_IDX:-1}
 
-case "$LAYOUT_IDX" in
-    2) DUPLEX_REQ="simplex"; COLOR_REQ="color" ;;
-    3) DUPLEX_REQ="duplex";  COLOR_REQ="mono"  ;;
-    4) DUPLEX_REQ="duplex";  COLOR_REQ="color" ;;
-    *) DUPLEX_REQ="simplex"; COLOR_REQ="mono"  ;;
+    case "$LAYOUT_IDX" in
+        2) DUPLEX_REQ="simplex"; COLOR_REQ="color" ;;
+        3) DUPLEX_REQ="duplex";  COLOR_REQ="mono"  ;;
+        4) DUPLEX_REQ="duplex";  COLOR_REQ="color" ;;
+        *) DUPLEX_REQ="simplex"; COLOR_REQ="mono"  ;;
+    esac
+
+    # 4. SELECT FINISHING SUITE OPTIONS
+    echo ""
+    echo "Select finishing hardware profile:"
+    echo "  [1] No Finishing (No Staple, No Punch) [Default]"
+    echo "  [2] Staple Only"
+    echo "  [3] Hole Punch Only"
+    echo "  [4] Both Staple and Hole Punch"
+    echo ""
+
+    read -p "Enter selection [1]: " FINISH_IDX
+    FINISH_IDX=${FINISH_IDX:-1}
+
+    case "$FINISH_IDX" in
+        2) STAPLE_REQ="staple"; PUNCH_REQ="none"   ;;
+        3) STAPLE_REQ="none";   PUNCH_REQ="punch"  ;;
+        4) STAPLE_REQ="staple"; PUNCH_REQ="punch"  ;;
+        *) STAPLE_REQ="none";   PUNCH_REQ="none"   ;;
+    esac
+fi
+
+echo ""
+echo "[*] Compiling hardware instructions for driver execution..."
+
+# ==============================================================================
+# SETTING MAP
+# Each setting has up to two driver keys (K1, K2) with an "on" and "off" value.
+# Easy mode applies ON/OFF per the simple menus; advanced mode lets you pick any
+# value the PPD offers for each key (ON values are shown as "recommended").
+# ==============================================================================
+case "$VENDOR" in
+    Canon)
+        DUPLEX_K1=CNDuplex;     DUPLEX_ON1=DuplexFront;   DUPLEX_OFF1=None
+        COLOR_K1=CNColorMode;   COLOR_ON1=color;          COLOR_OFF1=mono
+        STAPLE_K1=CNStaple;     STAPLE_ON1=True;          STAPLE_OFF1=False
+        STAPLE_K2=StapleLocation; STAPLE_ON2=TopLeft;     STAPLE_OFF2=""
+        PUNCH_K1=CNPuncher;     PUNCH_ON1=$(echo "$OPTIONS" | grep "^CNPuncher/" | grep -oE "PUNU23|PUNF24|PUNU24" | head -n1); PUNCH_OFF1=None
+        PUNCH_K2=CNMultiPunch;  PUNCH_ON2=PUNU3;          PUNCH_OFF2=Off ;;
+    Kyocera)
+        DUPLEX_K1=Duplex;       DUPLEX_ON1=DuplexNoTumble; DUPLEX_OFF1=None
+        COLOR_K1=ColorModel;    COLOR_ON1=CMYK;           COLOR_OFF1=Gray
+        STAPLE_K1=KCStaple;     STAPLE_ON1=Upperleft;     STAPLE_OFF1=None
+        PUNCH_K1=KCPunch;       PUNCH_ON1=3Hole;          PUNCH_OFF1=None ;;
+    Ricoh)
+        DUPLEX_K1=Duplex;       DUPLEX_ON1=DuplexNoTumble; DUPLEX_OFF1=None
+        COLOR_K1=ColorModel;    COLOR_ON1=CMYK;           COLOR_OFF1=Gray
+        STAPLE_K1=StapleLocation; STAPLE_ON1=UpperLeft;   STAPLE_OFF1=None
+        PUNCH_K1=RIPunch;       PUNCH_ON1=Left3;          PUNCH_OFF1=None ;;
+    Sharp)
+        DUPLEX_K1=Duplex;       DUPLEX_ON1=DuplexNoTumble; DUPLEX_OFF1=None
+        COLOR_K1=ARCMode;       COLOR_ON1=CMColor;        COLOR_OFF1=CMBW
+        STAPLE_K1=ARStaple;     STAPLE_ON1=Staple1;       STAPLE_OFF1=Staple0
+        PUNCH_K1=ARPunch;       PUNCH_ON1=Punch3;         PUNCH_OFF1=PunchNone ;;
 esac
 
-# 4. SELECT FINISHING SUITE OPTIONS
-echo ""
-echo "Select finishing hardware profile:"
-echo "  [1] No Finishing (No Staple, No Punch) [Default]"
-echo "  [2] Staple Only"
-echo "  [3] Hole Punch Only"
-echo "  [4] Both Staple and Hole Punch"
-echo ""
+# Drop second keys the driver doesn't actually have
+for S in STAPLE PUNCH; do
+    k="${S}_K2"
+    if [ -n "${!k}" ] && ! has_opt "${!k}"; then printf -v "$k" ''; fi
+done
 
-read -p "Enter selection [1]: " FINISH_IDX
-FINISH_IDX=${FINISH_IDX:-1}
+# label_of KEY VALUE -> human label from the queue's PPD, or VALUE if unknown
+PPD="/etc/cups/ppd/$QUEUE.ppd"
+label_of() {
+    local l=""
+    [ -r "$PPD" ] && l=$(grep -F -m1 "*$1 $2/" "$PPD" | sed 's/^[^\/]*\///; s/:.*//')
+    echo "${l:-$2}"
+}
 
-case "$FINISH_IDX" in
-    2) STAPLE_REQ="staple"; PUNCH_REQ="none"   ;;
-    3) STAPLE_REQ="none";   PUNCH_REQ="punch"  ;;
-    4) STAPLE_REQ="staple"; PUNCH_REQ="punch"  ;;
-    *) STAPLE_REQ="none";   PUNCH_REQ="none"   ;;
-esac
+# pick_option KEY TITLE RECOMMENDED DEFAULT
+# Shows the PPD's values for KEY as a numbered list; Enter selects DEFAULT.
+# Sets PICK_VAL and PICK_LABEL.
+pick_option() {
+    local key="$1" title="$2" rec="$3" def="$4" v n=0 defidx=1 ppddef="" extra
+    local vals=()
+    for v in $(echo "$OPTIONS" | grep "^$key/" | sed 's/^[^:]*: *//'); do
+        case "$v" in Custom.*) continue ;; esac
+        case "$v" in \**) ppddef="${v#\*}"; v="${v#\*}" ;; esac
+        vals+=("$v")
+    done
+    echo ""
+    echo "$title ($key):"
+    for v in "${vals[@]}"; do
+        n=$((n+1)); extra=""
+        [ "$v" = "$ppddef" ] && extra="$extra [current]"
+        [ "$v" = "$rec" ] && extra="$extra [recommended]"
+        [ "$v" = "$def" ] && defidx=$n
+        printf "  [%d] %s (%s)%s\n" "$n" "$(label_of "$key" "$v")" "$v" "$extra"
+    done
+    while true; do
+        read -p "Enter selection [$defidx]: " SEL
+        SEL=${SEL:-$defidx}
+        if [[ "$SEL" =~ ^[0-9]+$ ]] && [ "$SEL" -ge 1 ] && [ "$SEL" -le "$n" ]; then
+            PICK_VAL="${vals[$((SEL-1))]}"
+            PICK_LABEL="$(label_of "$key" "$PICK_VAL")"
+            return
+        fi
+        echo "[-] Invalid selection."
+    done
+}
 
-# 5. OPTIONAL JOB ACCOUNTING / USER CODE
+# build_setting NAME TITLE REQUESTED(1=on)
+# Appends -o flags to FLAGS and records the chosen label in CHOSEN_<NAME>
+build_setting() {
+    local S="$1" title="$2" on="$3" n key onv offv val first_val="" label=""
+    for n in 1 2; do
+        eval "key=\${${S}_K$n}; onv=\${${S}_ON$n}; offv=\${${S}_OFF$n}"
+        [ -z "$key" ] && continue
+        if [ "$ADVANCED" -eq 1 ]; then
+            # Second key (e.g. staple position) only matters if the first is on
+            if [ "$n" -eq 2 ] && [ "$first_val" = "$(eval echo \${${S}_OFF1})" ]; then continue; fi
+            pick_option "$key" "$title" "$onv" "$offv"
+            val="$PICK_VAL"; label="$PICK_LABEL"
+        else
+            if [ "$on" -eq 1 ]; then val="$onv"; else val="$offv"; fi
+            label=""
+        fi
+        [ "$n" -eq 1 ] && first_val="$val"
+        [ -n "$val" ] && FLAGS+=("-o" "$key=$val")
+        [ -n "$label" ] && CHOSEN_LABEL="$label"
+    done
+    CHOSEN_FIRST="$first_val"
+}
+
+FLAGS=()
+USER_FLAGS=()
+[ "$DUPLEX_REQ" = "duplex" ] && R=1 || R=0
+CHOSEN_LABEL=""; build_setting DUPLEX "Duplex" $R
+if [ "$ADVANCED" -eq 1 ]; then
+    [ "$CHOSEN_FIRST" = "$DUPLEX_OFF1" ] && SUM_DUPLEX="single" || SUM_DUPLEX="double ($CHOSEN_LABEL)"
+else
+    [ $R -eq 1 ] && SUM_DUPLEX="double" || SUM_DUPLEX="single"
+fi
+
+[ "$COLOR_REQ" = "color" ] && R=1 || R=0
+CHOSEN_LABEL=""; build_setting COLOR "Color mode" $R
+if [ "$ADVANCED" -eq 1 ]; then
+    if [ "$CHOSEN_FIRST" = "$COLOR_OFF1" ]; then SUM_COLOR="mono"
+    elif [ "$CHOSEN_FIRST" = "$COLOR_ON1" ]; then SUM_COLOR="color"
+    else SUM_COLOR="$CHOSEN_LABEL"; fi
+else
+    [ $R -eq 1 ] && SUM_COLOR="color" || SUM_COLOR="mono"
+fi
+
+[ "$STAPLE_REQ" = "staple" ] && R=1 || R=0
+CHOSEN_LABEL=""; build_setting STAPLE "Staple" $R
+if [ "$ADVANCED" -eq 1 ]; then
+    [ "$CHOSEN_FIRST" = "$STAPLE_OFF1" ] && SUM_STAPLE="none" || SUM_STAPLE="$CHOSEN_LABEL"
+else
+    [ $R -eq 1 ] && SUM_STAPLE="enabled" || SUM_STAPLE="none"
+fi
+
+[ "$PUNCH_REQ" = "punch" ] && R=1 || R=0
+CHOSEN_LABEL=""; build_setting PUNCH "Hole punch" $R
+if [ "$ADVANCED" -eq 1 ]; then
+    [ "$CHOSEN_FIRST" = "$PUNCH_OFF1" ] && SUM_PUNCH="none" || SUM_PUNCH="$CHOSEN_LABEL"
+else
+    [ $R -eq 1 ] && SUM_PUNCH="enabled" || SUM_PUNCH="none"
+fi
+
+# 4. OPTIONAL JOB ACCOUNTING / USER CODE
 echo ""
 read -p "Enable job accounting? [y/N]: " ACCT_ANS
 ACCT_REQ="no"
@@ -145,85 +299,15 @@ if [[ "$ACCT_ANS" =~ ^[Yy] ]]; then
     fi
 fi
 
-echo ""
-echo "[*] Compiling hardware instructions for driver execution..."
-
-# Flags following the chosen scope, and flags that are always per user
-FLAGS=()
-USER_FLAGS=()
-
-# ==============================================================================
-# DUPLEX
-# ==============================================================================
-case "$VENDOR" in
-    Canon)
-        if [ "$DUPLEX_REQ" = "duplex" ]; then FLAGS+=("-o" "CNDuplex=DuplexFront")
-        else FLAGS+=("-o" "CNDuplex=None"); fi ;;
-    *)  # Kyocera / Ricoh / Sharp use the standard Duplex key
-        if [ "$DUPLEX_REQ" = "duplex" ]; then FLAGS+=("-o" "Duplex=DuplexNoTumble")
-        else FLAGS+=("-o" "Duplex=None"); fi ;;
-esac
-
-# ==============================================================================
-# COLOR MODE
-# ==============================================================================
-case "$VENDOR" in
-    Canon)
-        [ "$COLOR_REQ" = "color" ] && FLAGS+=("-o" "CNColorMode=color") || FLAGS+=("-o" "CNColorMode=mono") ;;
-    Sharp)
-        [ "$COLOR_REQ" = "color" ] && FLAGS+=("-o" "ARCMode=CMColor") || FLAGS+=("-o" "ARCMode=CMBW") ;;
-    *)  # Kyocera / Ricoh
-        [ "$COLOR_REQ" = "color" ] && FLAGS+=("-o" "ColorModel=CMYK") || FLAGS+=("-o" "ColorModel=Gray") ;;
-esac
-
-# ==============================================================================
-# STAPLE
-# ==============================================================================
-if [ "$STAPLE_REQ" = "staple" ]; then
-    case "$VENDOR" in
-        Canon)   FLAGS+=("-o" "CNStaple=True" "-o" "StapleLocation=TopLeft") ;;
-        Kyocera) FLAGS+=("-o" "KCStaple=Upperleft") ;;
-        Ricoh)   FLAGS+=("-o" "StapleLocation=UpperLeft") ;;
-        Sharp)   FLAGS+=("-o" "ARStaple=Staple1") ;;
-    esac
-else
-    case "$VENDOR" in
-        Canon)   FLAGS+=("-o" "CNStaple=False") ;;
-        Kyocera) FLAGS+=("-o" "KCStaple=None") ;;
-        Ricoh)   FLAGS+=("-o" "StapleLocation=None") ;;
-        Sharp)   FLAGS+=("-o" "ARStaple=Staple0") ;;
-    esac
-fi
-
-# ==============================================================================
-# HOLE PUNCH
-# ==============================================================================
-if [ "$PUNCH_REQ" = "punch" ]; then
-    case "$VENDOR" in
-        Canon)
-            PUNCH_MOD=$(echo "$OPTIONS" | grep "^CNPuncher/" | grep -oE "PUNU23|PUNF24|PUNU24" | head -n1)
-            [ -n "$PUNCH_MOD" ] && FLAGS+=("-o" "CNPuncher=$PUNCH_MOD")
-            has_opt CNMultiPunch && FLAGS+=("-o" "CNMultiPunch=PUNU3") ;;
-        Kyocera) FLAGS+=("-o" "KCPunch=3Hole") ;;
-        Ricoh)   FLAGS+=("-o" "RIPunch=Left3") ;;
-        Sharp)   FLAGS+=("-o" "ARPunch=Punch3") ;;
-    esac
-else
-    case "$VENDOR" in
-        Canon)
-            FLAGS+=("-o" "CNPuncher=None")
-            has_opt CNMultiPunch && FLAGS+=("-o" "CNMultiPunch=Off") ;;
-        Kyocera) FLAGS+=("-o" "KCPunch=None") ;;
-        Ricoh)   FLAGS+=("-o" "RIPunch=None") ;;
-        Sharp)   FLAGS+=("-o" "ARPunch=PunchNone") ;;
-    esac
-fi
-
 # ==============================================================================
 # JOB ACCOUNTING / USER CODE
 # Enable switches follow the chosen scope; the code itself is always per user.
 # ==============================================================================
+SUM_ACCT="disabled"; SUM_CODE="none"
 if [ "$ACCT_REQ" = "yes" ]; then
+    SUM_ACCT="enabled"
+    [ -n "$USERCODE" ] && SUM_CODE="$USERCODE"
+    [ -n "$SHARP_LOGIN" ] && [ -n "$ACCT_LOGIN" ] && SUM_CODE="$ACCT_LOGIN (login)"
     case "$VENDOR" in
         Canon)   # Dept ID/PIN are not PPD options; users enter them at print time
             FLAGS+=("-o" "CNUseJobAccount=True" "-o" "CNUsrManagement=Dept")
@@ -240,10 +324,12 @@ if [ "$ACCT_REQ" = "yes" ]; then
             fi ;;
         Kyocera)
             if [ -z "$USERCODE" ]; then
+                SUM_ACCT="disabled"
                 echo "[!] Kyocera: a code is required to enable job accounting."
             elif has_choice KmManagment "$USERCODE"; then
                 USER_FLAGS+=("-o" "KmManagment=$USERCODE")
             else
+                SUM_ACCT="disabled"; SUM_CODE="none"
                 echo "[!] Kyocera: code '$USERCODE' is not in this driver's list (e.g. MG00000001)."
             fi ;;
     esac
@@ -302,6 +388,14 @@ fi
 
 if [ "$APPLIED" -eq 1 ]; then
     echo "[+] Done."
+    echo ""
+    echo "Queue: $QUEUE"
+    echo "Color: $SUM_COLOR"
+    echo "Duplex: $SUM_DUPLEX"
+    echo "Staple: $SUM_STAPLE"
+    echo "Punch: $SUM_PUNCH"
+    echo "Accounting: $SUM_ACCT"
+    echo "Code: $SUM_CODE"
 else
     echo "[-] Nothing was applied."
 fi
