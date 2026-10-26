@@ -41,12 +41,12 @@ With global scope, the script also removes the current user's own overrides of t
 |---|---|---|
 | Canon | `CNUseJobAccount` + `CNUsrManagement=Dept` | Not settable: Dept ID/PIN aren't PPD options, so users enter them when printing |
 | Ricoh | `RIEnableUserCode` | `RIUserCode` |
-| Sharp | none | `ARUserNumber` |
+| Sharp | none | Your choice of user code (`ARUserNumber=Custom.<code>`) or login name + password (`ARAccountLogin`, `ARAccountPassword`) |
 | Kyocera | none | `KmManagment`; must be one of the driver's listed codes (e.g. `MG00000001`) |
 
-Answering `n` turns accounting off (Canon, Ricoh) or resets Kyocera's code to `Default`. For Sharp, the saved user number is left unchanged.
+Answering `n` turns accounting off (Canon, Ricoh) resets Kyocera's code to `Default`, or clears your saved Sharp user number / login / password. On Sharp, picking one method also clears the other's saved values.
 
-User codes are stored in plain text in `~/.cups/lpoptions`.
+User codes (and Sharp passwords) are stored in plain text in `~/.cups/lpoptions`.
 
 ## Testing status
 

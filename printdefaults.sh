@@ -127,7 +127,22 @@ ACCT_REQ="no"
 USERCODE=""
 if [[ "$ACCT_ANS" =~ ^[Yy] ]]; then
     ACCT_REQ="yes"
-    read -p "User code (saved per user; blank = none): " USERCODE
+    if [ "$VENDOR" = "Sharp" ]; then
+        echo "Sharp accounting method:"
+        echo "  [1] User code (user number) [Default]"
+        echo "  [2] Login name and password"
+        read -p "Enter selection [1]: " SHARP_METHOD
+        if [ "${SHARP_METHOD:-1}" = "2" ]; then
+            SHARP_LOGIN=1
+            read -p "Login name (saved per user): " ACCT_LOGIN
+            read -s -p "Password (hidden): " ACCT_PASS
+            echo ""
+        else
+            read -p "User code (saved per user; blank = none): " USERCODE
+        fi
+    else
+        read -p "User code (saved per user; blank = none): " USERCODE
+    fi
 fi
 
 echo ""
@@ -217,7 +232,12 @@ if [ "$ACCT_REQ" = "yes" ]; then
             FLAGS+=("-o" "RIEnableUserCode=True")
             [ -n "$USERCODE" ] && USER_FLAGS+=("-o" "RIUserCode=Custom.$USERCODE") ;;
         Sharp)
-            [ -n "$USERCODE" ] && USER_FLAGS+=("-o" "ARUserNumber=Custom.$USERCODE") ;;
+            if [ -n "$SHARP_LOGIN" ]; then
+                [ -n "$ACCT_LOGIN" ] && USER_FLAGS+=("-o" "ARAccountLogin=Custom.$ACCT_LOGIN")
+                [ -n "$ACCT_PASS" ] && USER_FLAGS+=("-o" "ARAccountPassword=Custom.$ACCT_PASS")
+            else
+                [ -n "$USERCODE" ] && USER_FLAGS+=("-o" "ARUserNumber=Custom.$USERCODE")
+            fi ;;
         Kyocera)
             if [ -z "$USERCODE" ]; then
                 echo "[!] Kyocera: a code is required to enable job accounting."
@@ -232,6 +252,7 @@ else # Accounting off
         Canon)   FLAGS+=("-o" "CNUseJobAccount=False" "-o" "CNUsrManagement=Off") ;;
         Ricoh)   FLAGS+=("-o" "RIEnableUserCode=False") ;;
         Kyocera) USER_FLAGS+=("-o" "KmManagment=Default") ;;  # code option is per user
+        Sharp)   SHARP_CLEAR=1 ;;  # drop this user's saved code/login (done below)
     esac
 fi
 
@@ -258,6 +279,20 @@ if [ ${#FLAGS[@]} -gt 0 ]; then
         echo "[+] Applying per-user defaults to $QUEUE for $USER..."
         lpoptions -p "$QUEUE" "${FLAGS[@]}" && APPLIED=1
     fi
+fi
+
+if [ "$VENDOR" = "Sharp" ] && [ "$ACCT_REQ" = "yes" ]; then
+    # Remove the unused method's saved values so only one method is active
+    if [ -n "$SHARP_LOGIN" ]; then STALE="ARUserNumber"; else STALE="ARAccountLogin ARAccountPassword"; fi
+    for o in $STALE; do lpoptions -p "$QUEUE" -r "$o" >/dev/null 2>&1; done
+fi
+
+if [ -n "$SHARP_CLEAR" ]; then
+    echo "[+] Clearing saved Sharp accounting settings for $USER..."
+    for o in ARUserNumber ARAccountLogin ARAccountPassword; do
+        lpoptions -p "$QUEUE" -r "$o" >/dev/null 2>&1
+    done
+    APPLIED=1
 fi
 
 if [ ${#USER_FLAGS[@]} -gt 0 ]; then
