@@ -1,18 +1,22 @@
 #!/bin/bash
 
 # ==============================================================================
-# UNIVERSAL PRINTER CONFIGURATION INTERACTIVE WRAPPER
-# Supports: Canon, Ricoh, Kyocera, Sharp, and IPP Everywhere/AirPrint
+# PRINTER DEFAULTS INTERACTIVE WRAPPER
+# Supports: Canon, Ricoh, Sharp, Kyocera
+#
+# Layout/finishing/accounting-enable can be applied globally (all users, via
+# lpadmin + sudo) or per user (~/.cups/lpoptions). The user code is ALWAYS
+# stored per user.
 # ==============================================================================
 
 # 1. DISCOVER AND SELECT PRINTER QUEUE
 echo "=================================================="
-echo " Modern CUPS Fleet Printer Configuration Utility"
+echo " CUPS Printer Defaults Utility"
+echo " (Canon / Ricoh / Sharp / Kyocera)"
 echo "=================================================="
 echo "Fetching available printer queues..."
 echo ""
 
-# Get array of local printer queues
 IFS=$'\n' read -r -d '' -a PRINTERS < <(lpstat -p | awk '{print $2}' && printf '\0')
 
 if [ ${#PRINTERS[@]} -eq 0 ]; then
@@ -49,7 +53,37 @@ if [ -z "$OPTIONS" ]; then
     exit 1
 fi
 
-# 2. SELECT CONFIGURATION COMBINATION (DEFAULT: SIMPLEX + MONO)
+# has_opt NAME           -> option exists in the driver
+# has_choice NAME VALUE  -> option exists and offers VALUE
+has_opt() { echo "$OPTIONS" | grep -q "^$1/"; }
+has_choice() { echo "$OPTIONS" | grep "^$1/" | tr -d '*' | grep -qw -- "$2"; }
+
+# Identify the vendor from driver-specific option names
+if   has_opt CNColorMode;      then VENDOR="Canon"
+elif has_opt RIEnableUserCode; then VENDOR="Ricoh"
+elif has_opt ARCMode;          then VENDOR="Sharp"
+elif has_opt KCStaple || has_opt KmManagment; then VENDOR="Kyocera"
+else
+    echo "[-] Unsupported driver: no Canon, Ricoh, Sharp or Kyocera options found on '$QUEUE'."
+    exit 1
+fi
+echo "[+] Detected driver: $VENDOR"
+echo ""
+
+# 2. SCOPE: GLOBAL OR PER USER
+echo "Apply settings:"
+echo "  [1] Globally - all users of this Mac (requires admin) [Default]"
+echo "  [2] Per user - only for $USER"
+echo "(A user code, if entered, is always saved per user.)"
+echo ""
+read -p "Enter selection [1]: " SCOPE_IDX
+case "${SCOPE_IDX:-1}" in
+    2) SCOPE="user" ;;
+    *) SCOPE="global" ;;
+esac
+
+# 3. SELECT CONFIGURATION COMBINATION (DEFAULT: SIMPLEX + MONO)
+echo ""
 echo "Select layout options (Default: [1] Simplex + Monochrome):"
 echo "  [1] Simplex / Monochrome"
 echo "  [2] Simplex / Color"
@@ -58,16 +92,16 @@ echo "  [4] Duplex  / Color"
 echo ""
 
 read -p "Enter selection [1]: " LAYOUT_IDX
-LAYOUT_IDX=${LAYOUT_IDX:-1} # Default to 1 if empty
+LAYOUT_IDX=${LAYOUT_IDX:-1}
 
 case "$LAYOUT_IDX" in
     2) DUPLEX_REQ="simplex"; COLOR_REQ="color" ;;
     3) DUPLEX_REQ="duplex";  COLOR_REQ="mono"  ;;
     4) DUPLEX_REQ="duplex";  COLOR_REQ="color" ;;
-    *) DUPLEX_REQ="simplex"; COLOR_REQ="mono"  ;; # Default fallback
+    *) DUPLEX_REQ="simplex"; COLOR_REQ="mono"  ;;
 esac
 
-# 3. SELECT FINISHING SUITE OPTIONS
+# 4. SELECT FINISHING SUITE OPTIONS
 echo ""
 echo "Select finishing hardware profile:"
 echo "  [1] No Finishing (No Staple, No Punch) [Default]"
@@ -77,221 +111,162 @@ echo "  [4] Both Staple and Hole Punch"
 echo ""
 
 read -p "Enter selection [1]: " FINISH_IDX
-FINISH_IDX=${FINISH_IDX:-1} # Default to 1 if empty
+FINISH_IDX=${FINISH_IDX:-1}
 
 case "$FINISH_IDX" in
     2) STAPLE_REQ="staple"; PUNCH_REQ="none"   ;;
     3) STAPLE_REQ="none";   PUNCH_REQ="punch"  ;;
     4) STAPLE_REQ="staple"; PUNCH_REQ="punch"  ;;
-    *) STAPLE_REQ="none";   PUNCH_REQ="none"   ;; # Default fallback
+    *) STAPLE_REQ="none";   PUNCH_REQ="none"   ;;
 esac
 
-# 4. OPTIONAL JOB ACCOUNTING / USER CODE
+# 5. OPTIONAL JOB ACCOUNTING / USER CODE
 echo ""
 read -p "Enable job accounting? [y/N]: " ACCT_ANS
 ACCT_REQ="no"
 USERCODE=""
 if [[ "$ACCT_ANS" =~ ^[Yy] ]]; then
     ACCT_REQ="yes"
-    read -p "User code / account ID (leave blank to enable accounting without a code): " USERCODE
-    if [ -n "$USERCODE" ]; then
-        read -s -p "PIN / password for this code (optional, hidden): " ACCT_PIN
-        echo ""
-    fi
+    read -p "User code (saved per user; blank = none): " USERCODE
 fi
 
 echo ""
 echo "[*] Compiling hardware instructions for driver execution..."
 
-# Array to collect our on-the-fly lpadmin flags
-LPADMIN_FLAGS=()
+# Flags following the chosen scope, and flags that are always per user
+FLAGS=()
+USER_FLAGS=()
 
 # ==============================================================================
-# VENDOR LOGIC MAP: DUPLEX
+# DUPLEX
 # ==============================================================================
-if [ "$DUPLEX_REQ" = "duplex" ]; then
-    if echo "$OPTIONS" | grep -q "CNDuplex"; then                       # Canon
-        LPADMIN_FLAGS+=("-o" "CNDuplex=DuplexFront")
-    elif echo "$OPTIONS" | grep -q "JobDuplex"; then                     # Kyocera
-        LPADMIN_FLAGS+=("-o" "JobDuplex=SimplexDuplex")
-    elif echo "$OPTIONS" | grep -q "Duplex"; then                        # Sharp / Ricoh / Fallback
-        if echo "$OPTIONS" | grep -F "Duplex=" | grep -q "DuplexNoTumbleK"; then
-            LPADMIN_FLAGS+=("-o" "Duplex=DuplexNoTumbleK")              # Sharp specific
-        elif echo "$OPTIONS" | grep -F "Duplex=" | grep -q "DuplexNoTumble"; then
-            LPADMIN_FLAGS+=("-o" "Duplex=DuplexNoTumble")
-        else
-            LPADMIN_FLAGS+=("-o" "Duplex=Vertical")
-        fi
-    elif echo "$OPTIONS" | grep -q "TwoSided"; then                      # Generics
-        LPADMIN_FLAGS+=("-o" "TwoSided=LongEdge")
-    elif echo "$OPTIONS" | grep -F "sides=" | grep -q "two-sided-long-edge"; then
-        LPADMIN_FLAGS+=("-o" "sides=two-sided-long-edge")
-    fi
-else # Simplex requested
-    if echo "$OPTIONS" | grep -q "CNDuplex"; then
-        LPADMIN_FLAGS+=("-o" "CNDuplex=None")
-    elif echo "$OPTIONS" | grep -q "JobDuplex"; then
-        LPADMIN_FLAGS+=("-o" "JobDuplex=SimplexNone")
-    elif echo "$OPTIONS" | grep -q "Duplex"; then
-        LPADMIN_FLAGS+=("-o" "Duplex=None")
-    elif echo "$OPTIONS" | grep -q "TwoSided"; then
-        LPADMIN_FLAGS+=("-o" "TwoSided=None")
-    elif echo "$OPTIONS" | grep -F "sides=" | grep -q "one-sided"; then
-        LPADMIN_FLAGS+=("-o" "sides=one-sided")
-    fi
-fi
+case "$VENDOR" in
+    Canon)
+        if [ "$DUPLEX_REQ" = "duplex" ]; then FLAGS+=("-o" "CNDuplex=DuplexFront")
+        else FLAGS+=("-o" "CNDuplex=None"); fi ;;
+    *)  # Kyocera / Ricoh / Sharp use the standard Duplex key
+        if [ "$DUPLEX_REQ" = "duplex" ]; then FLAGS+=("-o" "Duplex=DuplexNoTumble")
+        else FLAGS+=("-o" "Duplex=None"); fi ;;
+esac
 
 # ==============================================================================
-# VENDOR LOGIC MAP: COLOR MODE
+# COLOR MODE
 # ==============================================================================
-if [ "$COLOR_REQ" = "mono" ]; then
-    if echo "$OPTIONS" | grep -q "CNColorMode"; then                      # Canon
-        LPADMIN_FLAGS+=("-o" "CNColorMode=mono")
-    elif echo "$OPTIONS" | grep -q "KCColorMode"; then                    # Kyocera
-        LPADMIN_FLAGS+=("-o" "KCColorMode=KCMono")
-    elif echo "$OPTIONS" | grep -q "ColorMode"; then                      # Ricoh / Sharp
-        if echo "$OPTIONS" | grep -F "ColorMode=" | grep -q "BW"; then LPADMIN_FLAGS+=("-o" "ColorMode=BW")
-        elif echo "$OPTIONS" | grep -F "ColorMode=" | grep -q "Mono"; then LPADMIN_FLAGS+=("-o" "ColorMode=Mono")
-        elif echo "$OPTIONS" | grep -F "ColorMode=" | grep -q "BlackWhite"; then LPADMIN_FLAGS+=("-o" "ColorMode=BlackWhite")
-        fi
-    elif echo "$OPTIONS" | grep -q "ColorModel"; then                    # Fallbacks
-        if echo "$OPTIONS" | grep -F "ColorModel=" | grep -q "Gray"; then LPADMIN_FLAGS+=("-o" "ColorModel=Gray")
-        elif echo "$OPTIONS" | grep -F "ColorModel=" | grep -q "Monochrome"; then LPADMIN_FLAGS+=("-o" "ColorModel=Monochrome")
-        fi
-    fi
-else # Color requested
-    if echo "$OPTIONS" | grep -q "CNColorMode"; then
-        LPADMIN_FLAGS+=("-o" "CNColorMode=color")
-    elif echo "$OPTIONS" | grep -q "KCColorMode"; then
-        LPADMIN_FLAGS+=("-o" "KCColorMode=KCColor")
-    elif echo "$OPTIONS" | grep -q "ColorMode"; then
-        LPADMIN_FLAGS+=("-o" "ColorMode=Color")
-    elif echo "$OPTIONS" | grep -q "ColorModel"; then
-        if echo "$OPTIONS" | grep -F "ColorModel=" | grep -q "RGB"; then LPADMIN_FLAGS+=("-o" "ColorModel=RGB")
-        elif echo "$OPTIONS" | grep -F "ColorModel=" | grep -q "Color"; then LPADMIN_FLAGS+=("-o" "ColorModel=Color")
-        fi
-    fi
-fi
+case "$VENDOR" in
+    Canon)
+        [ "$COLOR_REQ" = "color" ] && FLAGS+=("-o" "CNColorMode=color") || FLAGS+=("-o" "CNColorMode=mono") ;;
+    Sharp)
+        [ "$COLOR_REQ" = "color" ] && FLAGS+=("-o" "ARCMode=CMColor") || FLAGS+=("-o" "ARCMode=CMBW") ;;
+    *)  # Kyocera / Ricoh
+        [ "$COLOR_REQ" = "color" ] && FLAGS+=("-o" "ColorModel=CMYK") || FLAGS+=("-o" "ColorModel=Gray") ;;
+esac
 
 # ==============================================================================
-# VENDOR LOGIC MAP: STAPLE
+# STAPLE
 # ==============================================================================
 if [ "$STAPLE_REQ" = "staple" ]; then
-    if echo "$OPTIONS" | grep -q "CNStaple"; then                        # Canon
-        LPADMIN_FLAGS+=("-o" "CNStaple=True" "-o" "StapleLocation=TopLeft")
-    elif echo "$OPTIONS" | grep -q "KCStaple"; then                      # Kyocera
-        LPADMIN_FLAGS+=("-o" "KCStaple=UpperLeft")
-    elif echo "$OPTIONS" | grep -q "StapleLocation"; then                # Ricoh / Fallback
-        if echo "$OPTIONS" | grep -F "StapleLocation=" | grep -q "UpperLeft"; then
-            LPADMIN_FLAGS+=("-o" "StapleLocation=UpperLeft")
-        else
-            LPADMIN_FLAGS+=("-o" "StapleLocation=SinglePortrait")
-        fi
-    elif echo "$OPTIONS" | grep -q "StaplePos"; then                     # Sharp
-        LPADMIN_FLAGS+=("-o" "StaplePos=1StapleFront")
-    fi
-else # Disable stapling
-    if echo "$OPTIONS" | grep -q "CNStaple"; then LPADMIN_FLAGS+=("-o" "CNStaple=False")
-    elif echo "$OPTIONS" | grep -q "KCStaple"; then LPADMIN_FLAGS+=("-o" "KCStaple=None")
-    elif echo "$OPTIONS" | grep -q "StapleLocation"; then LPADMIN_FLAGS+=("-o" "StapleLocation=None")
-    elif echo "$OPTIONS" | grep -q "StaplePos"; then LPADMIN_FLAGS+=("-o" "StaplePos=None")
-    fi
+    case "$VENDOR" in
+        Canon)   FLAGS+=("-o" "CNStaple=True" "-o" "StapleLocation=TopLeft") ;;
+        Kyocera) FLAGS+=("-o" "KCStaple=Upperleft") ;;
+        Ricoh)   FLAGS+=("-o" "StapleLocation=UpperLeft") ;;
+        Sharp)   FLAGS+=("-o" "ARStaple=Staple1") ;;
+    esac
+else
+    case "$VENDOR" in
+        Canon)   FLAGS+=("-o" "CNStaple=False") ;;
+        Kyocera) FLAGS+=("-o" "KCStaple=None") ;;
+        Ricoh)   FLAGS+=("-o" "StapleLocation=None") ;;
+        Sharp)   FLAGS+=("-o" "ARStaple=Staple0") ;;
+    esac
 fi
 
 # ==============================================================================
-# VENDOR LOGIC MAP: HOLE PUNCH
+# HOLE PUNCH
 # ==============================================================================
 if [ "$PUNCH_REQ" = "punch" ]; then
-    if echo "$OPTIONS" | grep -q "CNPuncher"; then                       # Canon
-        PUNCH_MOD=$(echo "$OPTIONS" | grep "CNPuncher" | grep -oE "PUNU23|PUNF24|PUNU24" | head -n1)
-        [ -n "$PUNCH_MOD" ] && LPADMIN_FLAGS+=("-o" "CNPuncher=$PUNCH_MOD")
-        echo "$OPTIONS" | grep -q "CNMultiPunch" && LPADMIN_FLAGS+=("-o" "CNMultiPunch=PUNU3")
-    elif echo "$OPTIONS" | grep -q "KCPunch"; then                       # Kyocera
-        LPADMIN_FLAGS+=("-o" "KCPunch=On")
-    elif echo "$OPTIONS" | grep -q "PunchOption"; then                    # Ricoh
-        LPADMIN_FLAGS+=("-o" "PunchOption=On")
-    elif echo "$OPTIONS" | grep -q "PunchType"; then                     # Sharp
-        PUNCH_VAL=$(echo "$OPTIONS" | grep "PunchType" | grep -oE "3Holes|2Or3Holes|On" | head -n1)
-        [ -n "$PUNCH_VAL" ] && LPADMIN_FLAGS+=("-o" "PunchType=$PUNCH_VAL")
-    fi
-else # Disable punching
-    if echo "$OPTIONS" | grep -q "CNPuncher"; then 
-        LPADMIN_FLAGS+=("-o" "CNPuncher=None")
-        echo "$OPTIONS" | grep -q "CNMultiPunch" && LPADMIN_FLAGS+=("-o" "CNMultiPunch=Off")
-    elif echo "$OPTIONS" | grep -q "KCPunch"; then LPADMIN_FLAGS+=("-o" "KCPunch=None")
-    elif echo "$OPTIONS" | grep -q "PunchOption"; then LPADMIN_FLAGS+=("-o" "PunchOption=None")
-    elif echo "$OPTIONS" | grep -q "PunchType"; then LPADMIN_FLAGS+=("-o" "PunchType=None")
-    fi
-fi
-
-# ==============================================================================
-# VENDOR LOGIC MAP: JOB ACCOUNTING / USER CODE
-# ==============================================================================
-# Canon's Dept ID / PIN are entered in the driver dialog and are not exposed as
-# PPD options, so for Canon only the enable switch can be set from here.
-if [ "$ACCT_REQ" = "yes" ]; then
-    if echo "$OPTIONS" | grep -q "CNUseJobAccount"; then                   # Canon
-        LPADMIN_FLAGS+=("-o" "CNUseJobAccount=True")
-        echo "$OPTIONS" | grep -q "CNUsrManagement" && LPADMIN_FLAGS+=("-o" "CNUsrManagement=Dept")
-        [ -n "$USERCODE" ] && echo "[!] Canon: Department ID/PIN cannot be preset; users enter them at print time."
-    elif echo "$OPTIONS" | grep -q "KmManagment"; then                     # Kyocera
-        if [ -z "$USERCODE" ]; then
-            echo "[!] Kyocera: an accounting code is required to enable job accounting."
-        elif echo "$OPTIONS" | grep -F "KmManagment/" | grep -qw -- "$USERCODE"; then
-            LPADMIN_FLAGS+=("-o" "KmManagment=$USERCODE")
-        else
-            echo "[!] Kyocera: code '$USERCODE' is not in this driver's accounting list (e.g. MG00000001)."
-        fi
-    elif echo "$OPTIONS" | grep -q "KMSection"; then                      # Konica Minolta
-        LPADMIN_FLAGS+=("-o" "KMSection=True")
-        echo "[!] Konica Minolta: Account Track enabled; the account number is entered at print time."
-    elif echo "$OPTIONS" | grep -q "ARAccountLogin"; then                  # Sharp
-        if [ -n "$USERCODE" ]; then
-            LPADMIN_FLAGS+=("-o" "ARAccountLogin=Custom.$USERCODE")
-            [ -n "$ACCT_PIN" ] && LPADMIN_FLAGS+=("-o" "ARAccountPassword=Custom.$ACCT_PIN")
-        else
-            echo "[!] Sharp: a login name/user code is required."
-        fi
-    elif echo "$OPTIONS" | grep -qiE "^[A-Za-z]*UserCode"; then            # Ricoh (unverified)
-        UC_OPT=$(echo "$OPTIONS" | grep -iE "^[A-Za-z]*UserCode" | head -n1 | cut -d/ -f1)
-        [ -n "$USERCODE" ] && LPADMIN_FLAGS+=("-o" "$UC_OPT=Custom.$USERCODE")
-    else
-        echo "[!] No known job accounting option found for this driver."
-    fi
-else # Accounting not requested: turn it off where a simple switch exists
-    if echo "$OPTIONS" | grep -q "CNUseJobAccount"; then
-        LPADMIN_FLAGS+=("-o" "CNUseJobAccount=False")
-        echo "$OPTIONS" | grep -q "CNUsrManagement" && LPADMIN_FLAGS+=("-o" "CNUsrManagement=Off")
-    elif echo "$OPTIONS" | grep -q "KmManagment"; then LPADMIN_FLAGS+=("-o" "KmManagment=Default")
-    elif echo "$OPTIONS" | grep -q "KMSection"; then LPADMIN_FLAGS+=("-o" "KMSection=False")
-    fi
-fi
-
-# ==============================================================================
-# EXECUTION (GLOBAL / SYSTEM-WIDE)
-# ==============================================================================
-# lpadmin writes the queue defaults to the CUPS server (/etc/cups/printers.conf),
-# so they apply to every user. It needs root; re-run under sudo if necessary.
-# Per-user overrides in ~/.cups/lpoptions would mask these defaults, so any
-# override of the options we set is removed for the invoking user.
-if [ ${#LPADMIN_FLAGS[@]} -gt 0 ]; then
-    SUDO=""
-    [ "$(id -u)" -ne 0 ] && SUDO="sudo"
-    echo "[+] Applying global defaults to $QUEUE (may prompt for admin password)..."
-    if $SUDO lpadmin -p "$QUEUE" "${LPADMIN_FLAGS[@]}"; then
-        REAL_USER="${SUDO_USER:-$USER}"
-        USER_HOME=$(eval echo "~$REAL_USER")
-        if [ -f "$USER_HOME/.cups/lpoptions" ]; then
-            for ((k=1; k<${#LPADMIN_FLAGS[@]}; k+=2)); do
-                OPT_NAME="${LPADMIN_FLAGS[k]%%=*}"
-                lpoptions -p "$QUEUE" -r "$OPT_NAME" >/dev/null 2>&1
-            done
-        fi
-        echo "[+] Done. Global defaults set for all users of $QUEUE."
-    else
-        echo "[-] lpadmin failed; no changes were applied."
-        exit 1
-    fi
+    case "$VENDOR" in
+        Canon)
+            PUNCH_MOD=$(echo "$OPTIONS" | grep "^CNPuncher/" | grep -oE "PUNU23|PUNF24|PUNU24" | head -n1)
+            [ -n "$PUNCH_MOD" ] && FLAGS+=("-o" "CNPuncher=$PUNCH_MOD")
+            has_opt CNMultiPunch && FLAGS+=("-o" "CNMultiPunch=PUNU3") ;;
+        Kyocera) FLAGS+=("-o" "KCPunch=3Hole") ;;
+        Ricoh)   FLAGS+=("-o" "RIPunch=Left3") ;;
+        Sharp)   FLAGS+=("-o" "ARPunch=Punch3") ;;
+    esac
 else
-    echo "[-] No valid target driver options matched configuration profiles."
+    case "$VENDOR" in
+        Canon)
+            FLAGS+=("-o" "CNPuncher=None")
+            has_opt CNMultiPunch && FLAGS+=("-o" "CNMultiPunch=Off") ;;
+        Kyocera) FLAGS+=("-o" "KCPunch=None") ;;
+        Ricoh)   FLAGS+=("-o" "RIPunch=None") ;;
+        Sharp)   FLAGS+=("-o" "ARPunch=PunchNone") ;;
+    esac
+fi
+
+# ==============================================================================
+# JOB ACCOUNTING / USER CODE
+# Enable switches follow the chosen scope; the code itself is always per user.
+# ==============================================================================
+if [ "$ACCT_REQ" = "yes" ]; then
+    case "$VENDOR" in
+        Canon)   # Dept ID/PIN are not PPD options; users enter them at print time
+            FLAGS+=("-o" "CNUseJobAccount=True" "-o" "CNUsrManagement=Dept")
+            [ -n "$USERCODE" ] && echo "[!] Canon: Department ID/PIN cannot be preset; enter them when printing." ;;
+        Ricoh)
+            FLAGS+=("-o" "RIEnableUserCode=True")
+            [ -n "$USERCODE" ] && USER_FLAGS+=("-o" "RIUserCode=Custom.$USERCODE") ;;
+        Sharp)
+            [ -n "$USERCODE" ] && USER_FLAGS+=("-o" "ARUserNumber=Custom.$USERCODE") ;;
+        Kyocera)
+            if [ -z "$USERCODE" ]; then
+                echo "[!] Kyocera: a code is required to enable job accounting."
+            elif has_choice KmManagment "$USERCODE"; then
+                USER_FLAGS+=("-o" "KmManagment=$USERCODE")
+            else
+                echo "[!] Kyocera: code '$USERCODE' is not in this driver's list (e.g. MG00000001)."
+            fi ;;
+    esac
+else # Accounting off
+    case "$VENDOR" in
+        Canon)   FLAGS+=("-o" "CNUseJobAccount=False" "-o" "CNUsrManagement=Off") ;;
+        Ricoh)   FLAGS+=("-o" "RIEnableUserCode=False") ;;
+        Kyocera) USER_FLAGS+=("-o" "KmManagment=Default") ;;  # code option is per user
+    esac
+fi
+
+# ==============================================================================
+# EXECUTION
+# ==============================================================================
+APPLIED=0
+
+if [ ${#FLAGS[@]} -gt 0 ]; then
+    if [ "$SCOPE" = "global" ]; then
+        # lpadmin stores defaults on the CUPS server, so they apply to all users.
+        SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
+        echo "[+] Applying global defaults to $QUEUE (may prompt for admin password)..."
+        if $SUDO lpadmin -p "$QUEUE" "${FLAGS[@]}"; then
+            APPLIED=1
+            # A per-user override would mask the new global default; remove those
+            for ((k=1; k<${#FLAGS[@]}; k+=2)); do
+                lpoptions -p "$QUEUE" -r "${FLAGS[k]%%=*}" >/dev/null 2>&1
+            done
+        else
+            echo "[-] lpadmin failed; global settings were not applied."
+        fi
+    else
+        echo "[+] Applying per-user defaults to $QUEUE for $USER..."
+        lpoptions -p "$QUEUE" "${FLAGS[@]}" && APPLIED=1
+    fi
+fi
+
+if [ ${#USER_FLAGS[@]} -gt 0 ]; then
+    echo "[+] Saving user code for $USER (per user)..."
+    lpoptions -p "$QUEUE" "${USER_FLAGS[@]}" && APPLIED=1
+fi
+
+if [ "$APPLIED" -eq 1 ]; then
+    echo "[+] Done."
+else
+    echo "[-] Nothing was applied."
 fi

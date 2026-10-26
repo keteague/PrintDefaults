@@ -1,14 +1,15 @@
 # PrintDefaults
 
-Interactive macOS/CUPS script that sets **system-wide default print options** on a printer queue, across Canon, Kyocera, Konica Minolta, Ricoh, Sharp and generic IPP Everywhere/AirPrint drivers. It reads the queue's actual PPD options (`lpoptions -l`) and maps your choices to whichever vendor-specific option names that driver uses.
+Interactive macOS/CUPS script that sets default print options on a printer queue for **Canon, Ricoh, Sharp and Kyocera** drivers. It reads the queue's actual PPD options (`lpoptions -l`), detects the vendor from the driver's option names, and maps your choices to that vendor's option keys.
 
 ## What it configures
 
 | Setting | Choices |
 |---|---|
+| Scope | Global (all users) or per user |
 | Layout | Simplex/Duplex × Monochrome/Color (default: simplex + mono) |
 | Finishing | None, staple, hole punch, or both |
-| Job accounting (optional) | Off (default) or on, with an optional user code and PIN |
+| Job accounting (optional) | Off (default) or on, with an optional user code |
 
 ## Usage
 
@@ -17,34 +18,36 @@ chmod +x printdefaults.sh
 ./printdefaults.sh
 ```
 
-1. Pick a queue from the list of installed printers.
-2. Choose layout and finishing options.
-3. Answer `y` to "Enable job accounting?" if wanted, then enter the user code (and PIN, if the driver supports one).
-4. The script applies everything with `lpadmin`.
+1. Pick a queue from the installed printers; the driver vendor is detected automatically.
+2. Choose **global** or **per user**.
+3. Choose layout and finishing options.
+4. Answer `y` to "Enable job accounting?" if wanted, then enter a user code.
 
-Requires macOS (or any system with CUPS) and admin rights; the script calls `sudo` itself when not run as root.
+## Global vs. per user
 
-## Global vs. per-user
-
-Settings are written with `lpadmin`, which stores them on the CUPS server (`/etc/cups/printers.conf`), so they apply to **every user** of the Mac. Because per-user overrides in `~/.cups/lpoptions` take precedence over server defaults, the script also removes any override of the options it just set for the invoking user. Other users' own overrides are not touched.
-
-## Job accounting support
-
-Vendors expose accounting differently, so behaviour varies:
-
-| Driver | Option | Behaviour |
+| | Global | Per user |
 |---|---|---|
-| Canon | `CNUseJobAccount`, `CNUsrManagement` | Enables Department ID Management. Dept ID/PIN are not PPD options, so users enter them when printing. |
-| Kyocera | `KmManagment` | Sets the accounting code; it must be one of the driver's listed codes (e.g. `MG00000001`). |
-| Konica Minolta | `KMSection` | Enables Account Track; the account number is entered at print time. |
-| Sharp | `ARAccountLogin`, `ARAccountPassword` | Sets login name/user code and password. |
-| Ricoh | `*UserCode` option | Sets the user code. **Untested**, as no Ricoh queue was available. |
+| Mechanism | `sudo lpadmin` (stored in `/etc/cups/printers.conf`) | `lpoptions` (stored in `~/.cups/lpoptions`) |
+| Applies to | Every user of the Mac | Only the current user |
+| Needs admin | Yes (script calls `sudo`) | No |
 
-Answering `n` turns accounting off where the driver has a simple switch (Canon, Kyocera, Konica Minolta). Where no known option exists, the script says so and changes nothing for accounting.
+With global scope, the script also removes the current user's own overrides of the options it just set, since `~/.cups/lpoptions` would otherwise mask the new global default. Other users' overrides are left alone.
 
-Note: the PIN is passed to `lpadmin` on the command line, so it is briefly visible in the process list and stored in plain text in the CUPS configuration. Treat it as a convenience code, not a secret.
+**The user code is always saved per user**, even when everything else is global, so each person keeps their own code.
 
-## Notes
+## Job accounting and user codes
 
-- Drivers with no matching option for a setting are skipped silently for that setting.
-- Test on a non-production queue first; option names come from each vendor's PPD and may differ between driver versions.
+| Driver | Enable switch (follows scope) | User code (always per user) |
+|---|---|---|
+| Canon | `CNUseJobAccount` + `CNUsrManagement=Dept` | Not settable: Dept ID/PIN aren't PPD options, so users enter them when printing |
+| Ricoh | `RIEnableUserCode` | `RIUserCode` |
+| Sharp | none | `ARUserNumber` |
+| Kyocera | none | `KmManagment`; must be one of the driver's listed codes (e.g. `MG00000001`) |
+
+Answering `n` turns accounting off (Canon, Ricoh) or resets Kyocera's code to `Default`. For Sharp, the saved user number is left unchanged.
+
+User codes are stored in plain text in `~/.cups/lpoptions`.
+
+## Testing status
+
+Per-user mode was exercised against Canon, Ricoh, Kyocera and Sharp queues. Global mode (sudo/`lpadmin`) has not been run end to end. Option names come from vendor PPDs and may differ between driver versions, so try a test queue first.
