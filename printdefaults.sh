@@ -331,16 +331,17 @@ if [ "$ACCT_REQ" = "yes" ]; then
     [ -n "$USERCODE" ] && SUM_CODE="${USERCODE#MG}"
     [ -n "$SHARP_LOGIN" ] && [ -n "$ACCT_LOGIN" ] && SUM_CODE="$ACCT_LOGIN (login)"
     case "$VENDOR" in
-        Canon)   # Dept ID/PIN are not PPD options; users enter them at print time
+        Canon)
             # Department ID Management is an "Installed Option" on the queue, so
-            # it takes effect when applied globally (lpadmin); per-user mode only
-            # records it in ~/.cups/lpoptions.
+            # it only takes effect when applied globally (lpadmin).
             FLAGS+=("-o" "CNUseJobAccount=True" "-o" "CNUsrManagement=Dept")
-            [ "$SCOPE" = "user" ] && echo "[i] Canon: Department ID Management is a queue-level setting; run again with the global option to enable it on the queue."
-            # Hidden driver job option (not in the PPD): <DeptID>_<PIN>
-            if [ -n "$USERCODE" ]; then
-                USER_FLAGS+=("-o" "CNJobAccount=${USERCODE}_${ACCT_PIN:-0}")
-                echo "[!] Canon: the ID/PIN are saved as the driver's CNJobAccount job option; confirm with a test print."
+            # The Dept ID/PIN live in the queue's PPD (like Canon's own Printer
+            # Utility writes them), i.e. queue-wide, so they need global mode.
+            if [ "$SCOPE" = "global" ]; then
+                [ -n "$USERCODE" ] && CANON_SET=1
+            else
+                [ -n "$USERCODE" ] && SUM_CODE="none"
+                echo "[i] Canon: Department ID Management and the Dept ID/PIN are queue-wide; run again with the global option to set them."
             fi ;;
         Ricoh)
             FLAGS+=("-o" "RIEnableUserCode=True")
@@ -366,12 +367,44 @@ if [ "$ACCT_REQ" = "yes" ]; then
 else # Accounting off
     case "$VENDOR" in
         Canon)   FLAGS+=("-o" "CNUseJobAccount=False" "-o" "CNUsrManagement=Off")
-                 lpoptions -p "$QUEUE" -r CNJobAccount >/dev/null 2>&1 ;;  # drop this user's saved ID/PIN
+                 [ "$SCOPE" = "global" ] && CANON_CLEAR=1 ;;
         Ricoh)   FLAGS+=("-o" "RIEnableUserCode=False") ;;
         Kyocera) USER_FLAGS+=("-o" "KmManagment=Default") ;;  # code option is per user
         Sharp)   SHARP_CLEAR=1 ;;  # drop this user's saved code/login (done below)
     esac
 fi
+
+# canon_set_account ID PIN
+# Canon's Printer Utility stores the Department ID/PIN inside the queue's PPD as
+# *%INFO_JoAc comment lines: a zlib-compressed XML blob (base64, 200-char lines,
+# terminated by END_<xml length>) whose id/password values are base64 of the
+# bitwise-NOT of each byte. Rewrite that block here (needs root; empty = clear).
+canon_set_account() {
+    local SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
+    $SUDO perl -MCompress::Zlib -MMIME::Base64 - "$PPD" "$1" "$2" "$USER" <<'PERL'
+my ($ppd, $id, $pin, $owner) = @ARGV;
+open(my $in, '<', $ppd) or die "cannot read $ppd: $!"; local $/; my $t = <$in>; close $in;
+sub enc { my $s = shift; return '<string/>' if $s eq '';
+          '<string>' . encode_base64(join('', map { chr(255 - ord($_)) } split //, $s), '') . '</string>' }
+my $b64 = join '', $t =~ /^\*%INFO_JoAc\d+: (?!END_)(\S+)$/mg;
+my $xml = $b64 ne '' ? uncompress(decode_base64($b64)) : undef;
+$xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n" .
+       '<CNXML><list_0><use_jobaccount><integer>0</integer></use_jobaccount><id><string/></id><password><string/></password><disable_bw><integer>0</integer></disable_bw><confirm_printing><integer>0</integer></confirm_printing><user_management><string>Dept</string></user_management><user_password><string/></user_password><owner><string/></owner></list_0></CNXML>' . "\n"
+    unless defined $xml;
+my ($e_id, $e_pin) = (enc($id), enc($pin));
+$xml =~ s{<id>.*?</id>}{<id>$e_id</id>}s;
+$xml =~ s{<password>.*?</password>}{<password>$e_pin</password>}s;
+$xml =~ s{<owner><string/></owner>}{'<owner>' . enc($owner) . '</owner>'}e;
+my $z = encode_base64(compress($xml), '');
+my @lines; my $n = 1;
+while ($z =~ /(.{1,200})/g) { push @lines, "*%INFO_JoAc$n: $1\n"; $n++ }
+push @lines, "*%INFO_JoAc$n: END_" . length($xml) . "\n";
+$t =~ s/^\*%INFO_JoAc\d+: \S*\n//mg;
+my $blk = join '', @lines;
+unless ($t =~ s/(^\*%INFO_PrPr\d+: END_\d+\n)/$1$blk/m) { $t =~ s/(^\*%INFO_[^\n]*\n)(?!.*^\*%INFO_)/$1$blk/ms or $t .= $blk }
+open(my $out, '>', $ppd) or die "cannot write $ppd: $!"; print $out $t; close $out;
+PERL
+}
 
 # ==============================================================================
 # EXECUTION
@@ -402,6 +435,14 @@ if [ ${#FLAGS[@]} -gt 0 ]; then
         echo "[+] Applying per-user defaults to $QUEUE for $USER..."
         lpoptions -p "$QUEUE" "${FLAGS[@]}" && APPLIED=1
     fi
+fi
+
+if [ -n "$CANON_SET" ]; then
+    echo "[+] Writing Department ID/PIN into the $QUEUE queue (queue-wide)..."
+    canon_set_account "$USERCODE" "$ACCT_PIN" && APPLIED=1 || SUM_CODE="none"
+elif [ -n "$CANON_CLEAR" ]; then
+    echo "[+] Clearing the stored Department ID/PIN on $QUEUE..."
+    canon_set_account "" "" && APPLIED=1
 fi
 
 if [ "$VENDOR" = "Sharp" ] && [ "$ACCT_REQ" = "yes" ]; then

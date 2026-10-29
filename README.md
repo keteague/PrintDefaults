@@ -57,13 +57,13 @@ In advanced mode, staple and punch show the chosen position/pattern (e.g. `Stapl
 
 With global scope, the script also removes the current user's own overrides of the options it just set, since `~/.cups/lpoptions` would otherwise mask the new global default. Other users' overrides are left alone.
 
-**The user code is always saved per user**, even when everything else is global, so each person keeps their own code.
+**The user code is saved per user** (in `~/.cups/lpoptions`), even when everything else is global, so each person keeps their own code. The exception is Canon: its Department ID/PIN live in the queue's PPD, so they are queue-wide and only written in global mode.
 
 ## Job accounting and user codes
 
 | Driver | Enable switch (follows scope) | User code (always per user) |
 |---|---|---|
-| Canon | `CNUseJobAccount` + `CNUsrManagement=Dept` (an installed option on the queue: choose **global** so it is set with `lpadmin`) | `CNJobAccount=<DeptID>_<PIN>` (hidden driver job option, not in the PPD; PIN `0` if blank). **Unverified** against a real print: confirm with a test job |
+| Canon | `CNUseJobAccount` + `CNUsrManagement=Dept` (queue-level installed option, set with `lpadmin`) | Department ID + PIN, written into the queue's PPD (`*%INFO_JoAc` block, the same place Canon's Printer Utility stores them). **Queue-wide**, so only written in global mode |
 | Ricoh | `RIEnableUserCode` | `RIUserCode` |
 | Sharp | none | Your choice of user code (`ARUserNumber=Custom.<code>`) or login name + password (`ARAccountLogin`, `ARAccountPassword`) |
 | Kyocera | none | `KmManagment`; the PPD only offers a fixed list (typically `00000000`–`00000030`), so arbitrary codes can't be set. Enter plain digits (e.g. `7`) and the script maps them to `MG00000007`, re-asking if the code isn't in the list |
