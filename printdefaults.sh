@@ -294,6 +294,22 @@ if [[ "$ACCT_ANS" =~ ^[Yy] ]]; then
         else
             read -p "User code (saved per user; blank = none): " USERCODE
         fi
+    elif [ "$VENDOR" = "Kyocera" ]; then
+        # The Kyocera PPD only offers a fixed list of codes (MG00000000...), so
+        # accept plain digits, normalise them, and re-ask until one matches.
+        KY_FIRST=$(echo "$OPTIONS" | grep "^KmManagment/" | tr -d '*' | grep -oE "MG[0-9]+" | head -n1)
+        KY_LAST=$(echo "$OPTIONS" | grep "^KmManagment/" | grep -oE "MG[0-9]+" | tail -n1)
+        echo "Kyocera accepts only the codes this driver lists: ${KY_FIRST#MG} to ${KY_LAST#MG}."
+        while true; do
+            read -p "User code (saved per user; blank = none): " USERCODE
+            [ -z "$USERCODE" ] && break
+            RAW_CODE="$USERCODE"
+            if [[ "$USERCODE" =~ ^[0-9]+$ ]]; then
+                USERCODE=$(printf "MG%08d" "$((10#$USERCODE))")
+            fi
+            has_choice KmManagment "$USERCODE" && break
+            echo "[-] '$RAW_CODE' is not one of the driver's codes (${KY_FIRST#MG} to ${KY_LAST#MG}). Try again or leave blank."
+        done
     else
         read -p "User code (saved per user; blank = none): " USERCODE
     fi
@@ -306,7 +322,7 @@ fi
 SUM_ACCT="disabled"; SUM_CODE="none"
 if [ "$ACCT_REQ" = "yes" ]; then
     SUM_ACCT="enabled"
-    [ -n "$USERCODE" ] && SUM_CODE="$USERCODE"
+    [ -n "$USERCODE" ] && SUM_CODE="${USERCODE#MG}"
     [ -n "$SHARP_LOGIN" ] && [ -n "$ACCT_LOGIN" ] && SUM_CODE="$ACCT_LOGIN (login)"
     case "$VENDOR" in
         Canon)   # Dept ID/PIN are not PPD options; users enter them at print time

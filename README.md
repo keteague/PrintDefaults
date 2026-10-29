@@ -66,7 +66,7 @@ With global scope, the script also removes the current user's own overrides of t
 | Canon | `CNUseJobAccount` + `CNUsrManagement=Dept` | Not settable: Dept ID/PIN aren't PPD options, so users enter them when printing |
 | Ricoh | `RIEnableUserCode` | `RIUserCode` |
 | Sharp | none | Your choice of user code (`ARUserNumber=Custom.<code>`) or login name + password (`ARAccountLogin`, `ARAccountPassword`) |
-| Kyocera | none | `KmManagment`; must be one of the driver's listed codes (e.g. `MG00000001`) |
+| Kyocera | none | `KmManagment`; the PPD only offers a fixed list (typically `00000000`–`00000030`), so arbitrary codes can't be set. Enter plain digits (e.g. `7`) and the script maps them to `MG00000007`, re-asking if the code isn't in the list |
 
 Answering `n` turns accounting off (Canon, Ricoh), resets Kyocera's code to `Default`, or clears your saved Sharp user number / login / password. On Sharp, picking one method also clears the other's saved values.
 
