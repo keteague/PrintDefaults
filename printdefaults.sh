@@ -374,14 +374,14 @@ else # Accounting off
     esac
 fi
 
-# canon_set_account ID PIN
+# canon_set_account PPD ID PIN OWNER
 # Canon's Printer Utility stores the Department ID/PIN inside the queue's PPD as
 # *%INFO_JoAc comment lines: a zlib-compressed XML blob (base64, 200-char lines,
 # terminated by END_<xml length>) whose id/password values are base64 of the
-# bitwise-NOT of each byte. Rewrite that block here (needs root; empty = clear).
+# bitwise-NOT of each byte. Rewrite that block here (empty ID/PIN = clear).
+# Runs as root, inside the single sudo call made by apply_global below.
 canon_set_account() {
-    local SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
-    $SUDO perl -MCompress::Zlib -MMIME::Base64 - "$PPD" "$1" "$2" "$USER" <<'PERL'
+    perl -MCompress::Zlib -MMIME::Base64 - "$1" "$2" "$3" "$4" <<'PERL'
 my ($ppd, $id, $pin, $owner) = @ARGV;
 open(my $in, '<', $ppd) or die "cannot read $ppd: $!"; local $/; my $t = <$in>; close $in;
 sub enc { my $s = shift; return '<string/>' if $s eq '';
@@ -412,37 +412,40 @@ PERL
 APPLIED=0
 
 # apply_global FLAGS... : lpadmin stores defaults on the CUPS server, so they
-# apply to all users. A per-user override would mask them, so remove those.
+# apply to all users. Everything that needs root (lpadmin, plus the Canon
+# Department ID/PIN write when requested) runs in ONE sudo call, so there is a
+# single admin prompt. A per-user override would mask the new defaults, so those
+# are removed afterwards.
 apply_global() {
-    local SUDO="" k
+    local SUDO="" k mode="none" id="" pin=""
     [ "$(id -u)" -ne 0 ] && SUDO="sudo"
+    if [ -n "$CANON_SET" ]; then mode="set"; id="$USERCODE"; pin="$ACCT_PIN"
+    elif [ -n "$CANON_CLEAR" ]; then mode="clear"; fi
     echo "[+] Applying queue-wide settings to $QUEUE (may prompt for admin password)..."
-    if $SUDO lpadmin -p "$QUEUE" "$@"; then
+    if $SUDO bash -c '
+        eval "$1"; mode=$2; ppd=$3; id=$4; pin=$5; owner=$6; queue=$7; shift 7
+        if [ $# -gt 0 ]; then lpadmin -p "$queue" "$@" || exit 1; fi
+        case "$mode" in
+            set)   canon_set_account "$ppd" "$id" "$pin" "$owner" || exit 2 ;;
+            clear) canon_set_account "$ppd" "" "" "$owner" || exit 2 ;;
+        esac
+    ' _ "$(declare -f canon_set_account)" "$mode" "$PPD" "$id" "$pin" "$USER" "$QUEUE" "$@"; then
         APPLIED=1
         for ((k=2; k<=$#; k+=2)); do
             lpoptions -p "$QUEUE" -r "${!k%%=*}" >/dev/null 2>&1
         done
     else
-        echo "[-] lpadmin failed; queue-wide settings were not applied."
+        echo "[-] Applying queue-wide settings failed; check the messages above."
+        [ -n "$CANON_SET" ] && SUM_CODE="none"
         return 1
     fi
 }
 
-if [ ${#FLAGS[@]} -gt 0 ]; then
-    if [ "$SCOPE" = "global" ]; then
-        apply_global "${FLAGS[@]}"
-    else
-        echo "[+] Applying per-user defaults to $QUEUE for $USER..."
-        lpoptions -p "$QUEUE" "${FLAGS[@]}" && APPLIED=1
-    fi
-fi
-
-if [ -n "$CANON_SET" ]; then
-    echo "[+] Writing Department ID/PIN into the $QUEUE queue (queue-wide)..."
-    canon_set_account "$USERCODE" "$ACCT_PIN" && APPLIED=1 || SUM_CODE="none"
-elif [ -n "$CANON_CLEAR" ]; then
-    echo "[+] Clearing the stored Department ID/PIN on $QUEUE..."
-    canon_set_account "" "" && APPLIED=1
+if [ "$SCOPE" = "global" ]; then
+    { [ ${#FLAGS[@]} -gt 0 ] || [ -n "$CANON_SET$CANON_CLEAR" ]; } && apply_global "${FLAGS[@]}"
+elif [ ${#FLAGS[@]} -gt 0 ]; then
+    echo "[+] Applying per-user defaults to $QUEUE for $USER..."
+    lpoptions -p "$QUEUE" "${FLAGS[@]}" && APPLIED=1
 fi
 
 if [ "$VENDOR" = "Sharp" ] && [ "$ACCT_REQ" = "yes" ]; then

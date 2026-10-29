@@ -55,6 +55,8 @@ In advanced mode, staple and punch show the chosen position/pattern (e.g. `Stapl
 | Applies to | Every user of the Mac | Only the current user |
 | Needs admin | Yes (script calls `sudo`) | No |
 
+In global mode everything that needs admin rights (`lpadmin` and, for Canon, the Department ID/PIN write) runs in a single `sudo` call, so you are prompted for your password once.
+
 With global scope, the script also removes the current user's own overrides of the options it just set, since `~/.cups/lpoptions` would otherwise mask the new global default. Other users' overrides are left alone.
 
 **The user code is saved per user** (in `~/.cups/lpoptions`), even when everything else is global, so each person keeps their own code. The exception is Canon: its Department ID/PIN live in the queue's PPD, so they are queue-wide and only written in global mode.
