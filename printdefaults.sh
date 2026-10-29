@@ -332,7 +332,11 @@ if [ "$ACCT_REQ" = "yes" ]; then
     [ -n "$SHARP_LOGIN" ] && [ -n "$ACCT_LOGIN" ] && SUM_CODE="$ACCT_LOGIN (login)"
     case "$VENDOR" in
         Canon)   # Dept ID/PIN are not PPD options; users enter them at print time
+            # Department ID Management is an "Installed Option" on the queue, so
+            # it takes effect when applied globally (lpadmin); per-user mode only
+            # records it in ~/.cups/lpoptions.
             FLAGS+=("-o" "CNUseJobAccount=True" "-o" "CNUsrManagement=Dept")
+            [ "$SCOPE" = "user" ] && echo "[i] Canon: Department ID Management is a queue-level setting; run again with the global option to enable it on the queue."
             # Hidden driver job option (not in the PPD): <DeptID>_<PIN>
             if [ -n "$USERCODE" ]; then
                 USER_FLAGS+=("-o" "CNJobAccount=${USERCODE}_${ACCT_PIN:-0}")
@@ -374,20 +378,26 @@ fi
 # ==============================================================================
 APPLIED=0
 
+# apply_global FLAGS... : lpadmin stores defaults on the CUPS server, so they
+# apply to all users. A per-user override would mask them, so remove those.
+apply_global() {
+    local SUDO="" k
+    [ "$(id -u)" -ne 0 ] && SUDO="sudo"
+    echo "[+] Applying queue-wide settings to $QUEUE (may prompt for admin password)..."
+    if $SUDO lpadmin -p "$QUEUE" "$@"; then
+        APPLIED=1
+        for ((k=2; k<=$#; k+=2)); do
+            lpoptions -p "$QUEUE" -r "${!k%%=*}" >/dev/null 2>&1
+        done
+    else
+        echo "[-] lpadmin failed; queue-wide settings were not applied."
+        return 1
+    fi
+}
+
 if [ ${#FLAGS[@]} -gt 0 ]; then
     if [ "$SCOPE" = "global" ]; then
-        # lpadmin stores defaults on the CUPS server, so they apply to all users.
-        SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
-        echo "[+] Applying global defaults to $QUEUE (may prompt for admin password)..."
-        if $SUDO lpadmin -p "$QUEUE" "${FLAGS[@]}"; then
-            APPLIED=1
-            # A per-user override would mask the new global default; remove those
-            for ((k=1; k<${#FLAGS[@]}; k+=2)); do
-                lpoptions -p "$QUEUE" -r "${FLAGS[k]%%=*}" >/dev/null 2>&1
-            done
-        else
-            echo "[-] lpadmin failed; global settings were not applied."
-        fi
+        apply_global "${FLAGS[@]}"
     else
         echo "[+] Applying per-user defaults to $QUEUE for $USER..."
         lpoptions -p "$QUEUE" "${FLAGS[@]}" && APPLIED=1
