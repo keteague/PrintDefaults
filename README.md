@@ -63,7 +63,7 @@ With global scope, the script also removes the current user's own overrides of t
 
 | Driver | Enable switch (follows scope) | User code (always per user) |
 |---|---|---|
-| Canon | `CNUseJobAccount` + `CNUsrManagement=Dept` | Not settable: Dept ID/PIN aren't PPD options, so users enter them when printing |
+| Canon | `CNUseJobAccount` + `CNUsrManagement=Dept` | `CNJobAccount=<DeptID>_<PIN>` (hidden driver job option, not in the PPD; PIN `0` if blank). **Unverified** against a real print: confirm with a test job |
 | Ricoh | `RIEnableUserCode` | `RIUserCode` |
 | Sharp | none | Your choice of user code (`ARUserNumber=Custom.<code>`) or login name + password (`ARAccountLogin`, `ARAccountPassword`) |
 | Kyocera | none | `KmManagment`; the PPD only offers a fixed list (typically `00000000`–`00000030`), so arbitrary codes can't be set. Enter plain digits (e.g. `7`) and the script maps them to `MG00000007`, re-asking if the code isn't in the list |

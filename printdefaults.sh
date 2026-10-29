@@ -294,6 +294,12 @@ if [[ "$ACCT_ANS" =~ ^[Yy] ]]; then
         else
             read -p "User code (saved per user; blank = none): " USERCODE
         fi
+    elif [ "$VENDOR" = "Canon" ]; then
+        read -p "Department ID (saved per user; blank = none): " USERCODE
+        if [ -n "$USERCODE" ]; then
+            read -s -p "PIN (optional, hidden): " ACCT_PIN
+            echo ""
+        fi
     elif [ "$VENDOR" = "Kyocera" ]; then
         # The Kyocera PPD only offers a fixed list of codes (MG00000000...), so
         # accept plain digits, normalise them, and re-ask until one matches.
@@ -327,7 +333,11 @@ if [ "$ACCT_REQ" = "yes" ]; then
     case "$VENDOR" in
         Canon)   # Dept ID/PIN are not PPD options; users enter them at print time
             FLAGS+=("-o" "CNUseJobAccount=True" "-o" "CNUsrManagement=Dept")
-            [ -n "$USERCODE" ] && echo "[!] Canon: Department ID/PIN cannot be preset; enter them when printing." ;;
+            # Hidden driver job option (not in the PPD): <DeptID>_<PIN>
+            if [ -n "$USERCODE" ]; then
+                USER_FLAGS+=("-o" "CNJobAccount=${USERCODE}_${ACCT_PIN:-0}")
+                echo "[!] Canon: the ID/PIN are saved as the driver's CNJobAccount job option; confirm with a test print."
+            fi ;;
         Ricoh)
             FLAGS+=("-o" "RIEnableUserCode=True")
             [ -n "$USERCODE" ] && USER_FLAGS+=("-o" "RIUserCode=Custom.$USERCODE") ;;
@@ -351,7 +361,8 @@ if [ "$ACCT_REQ" = "yes" ]; then
     esac
 else # Accounting off
     case "$VENDOR" in
-        Canon)   FLAGS+=("-o" "CNUseJobAccount=False" "-o" "CNUsrManagement=Off") ;;
+        Canon)   FLAGS+=("-o" "CNUseJobAccount=False" "-o" "CNUsrManagement=Off")
+                 lpoptions -p "$QUEUE" -r CNJobAccount >/dev/null 2>&1 ;;  # drop this user's saved ID/PIN
         Ricoh)   FLAGS+=("-o" "RIEnableUserCode=False") ;;
         Kyocera) USER_FLAGS+=("-o" "KmManagment=Default") ;;  # code option is per user
         Sharp)   SHARP_CLEAR=1 ;;  # drop this user's saved code/login (done below)
