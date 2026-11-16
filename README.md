@@ -18,10 +18,14 @@ chmod +x printdefaults.sh
 ./printdefaults.sh
 ```
 
-1. Pick a queue from the installed printers; the driver vendor is detected automatically.
+1. Pick one or more queues from the installed printers. Separate numbers with commas to give several queues the same defaults, e.g. `1,2,4`. The queues may use different drivers; the vendor is detected for each one.
 2. Choose **global** or **per user**.
-3. Choose layout and finishing options.
-4. Answer `y` to "Enable job accounting?" if wanted, then enter a user code.
+3. Choose layout and finishing options (applied to every selected queue).
+4. Answer `y` to "Enable job accounting?" if wanted, then enter a user code. You are asked once per driver vendor among the selected queues (for example once for the Kyocera queues and once for the Ricoh queues).
+5. The settings are applied and a summary is printed for each queue.
+6. You are asked "Configure another printer?" so you can repeat the process for more printers in the same run.
+
+In global mode, everything that needs admin rights for **all** selected queues (every `lpadmin` call, plus the Canon Department ID/PIN writes) runs in a single `sudo` call, so you are prompted for your password once per run of the process, however many queues you picked.
 
 ### Advanced mode (`-a`)
 
@@ -29,7 +33,7 @@ chmod +x printdefaults.sh
 ./printdefaults.sh -a
 ```
 
-Without `-a` the script runs in easy mode (the simple menus above). With `-a`, the layout and finishing menus are replaced by a numbered list for each setting, built from the values the queue's PPD actually offers: duplex (long/short edge), color mode, staple (including position, e.g. top-right or 2 at left) and hole punch (e.g. 2 at top instead of 3 at left). Each list shows the PPD's human-readable labels, marks the **[current]** value and the easy-mode **[recommended]** value, and Enter keeps the "off" choice. For Canon, staple position and punch hole pattern are asked as a follow-up when stapling/punching is enabled. Scope selection and the accounting prompts work the same as in easy mode.
+Without `-a` the script runs in easy mode (the simple menus above). With `-a`, the layout and finishing menus are replaced by a numbered list for each setting, built from the values the queue's PPD actually offers: duplex (long/short edge), color mode, staple (including position, e.g. top-right or 2 at left) and hole punch (e.g. 2 at top instead of 3 at left). Each list shows the PPD's human-readable labels, marks the **[current]** value and the easy-mode **[recommended]** value, and Enter keeps the "off" choice. For Canon, staple position and punch hole pattern are asked as a follow-up when stapling/punching is enabled. Scope selection and the accounting prompts work the same as in easy mode. With several queues, the menus are shown once per driver vendor (using the first queue of that vendor); the other queues of that vendor get the same picks, and any value a particular queue doesn't offer is skipped with a warning.
 
 ## Output
 
@@ -67,8 +71,6 @@ For options 1-3 the script downloads the binary to a temporary folder, clears it
 | Mechanism | `sudo lpadmin` (stored in `/etc/cups/printers.conf`) | `lpoptions` (stored in `~/.cups/lpoptions`) |
 | Applies to | Every user of the Mac | Only the current user |
 | Needs admin | Yes (script calls `sudo`) | No |
-
-In global mode everything that needs admin rights (`lpadmin` and, for Canon, the Department ID/PIN write) runs in a single `sudo` call, so you are prompted for your password once.
 
 With global scope, the script also removes the current user's own overrides of the options it just set, since `~/.cups/lpoptions` would otherwise mask the new global default. Other users' overrides are left alone.
 
