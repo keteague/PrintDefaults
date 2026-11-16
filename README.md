@@ -47,6 +47,19 @@ Code: 12345
 
 In advanced mode, staple and punch show the chosen position/pattern (e.g. `Staple: Top right`, `Punch: 2 at top`). Passwords are never printed.
 
+### PaperCut CUPS web UI (optional)
+
+The first prompt offers PaperCut's [cups-webui](https://github.com/PaperCutSoftware/cups-web-interface), a browser-based alternative to the CUPS page on `localhost:631`:
+
+| Choice | Behavior |
+|---|---|
+| 1. Instead of this script | Download and run cups-webui only, then exit |
+| 2. Before this script | Run cups-webui first, then continue with this script |
+| 3. After this script | Run this script first, then cups-webui |
+| 4. Do not use it *(default)* | Nothing is downloaded; the script runs as usual |
+
+For options 1-3 the script downloads the binary to a temporary folder, clears its quarantine flag with `xattr -d com.apple.quarantine`, and runs it with `-open` (it opens at `http://127.0.0.1:6310`). It runs as the logged-in user, needs no `sudo`, and saves to `~/.cups/lpoptions`, including Canon settings. It keeps running until you press **CTRL-C**; the script then continues (option 2) or finishes (options 1 and 3) and deletes the downloaded copy. Note that the binary is fetched from the `main` branch of PaperCut's repository each time, so you get whatever is published there at that moment.
+
 ## Global vs. per user
 
 | | Global | Per user |

@@ -12,6 +12,9 @@
 #   (default)  easy mode: simple menus for layout, finishing and accounting
 #   -a         advanced mode: step through each setting and pick from the
 #              values the printer's PPD offers (staple position, punch type...)
+#
+# You are first asked whether to also use PaperCut's cups-webui (instead of,
+# before, or after this script; default: not at all).
 # ==============================================================================
 
 ADVANCED=0
@@ -21,6 +24,55 @@ while getopts "ah" OPT; do
         *) echo "Usage: $0 [-a]   (-a = advanced mode)"; exit 1 ;;
     esac
 done
+
+# 0. OPTIONAL: PAPERCUT CUPS WEB UI
+# PaperCut's cups-webui is a browser UI that runs as the logged-in user (no sudo)
+# and writes to ~/.cups/lpoptions. It keeps running until CTRL-C is pressed.
+WEBUI_URL="https://github.com/PaperCutSoftware/cups-web-interface/raw/main/bin/cups-webui"
+
+# run_webui: download cups-webui to a temp dir, clear the quarantine flag, run it
+# with -open, then clean up. Returns non-zero if the download fails.
+run_webui() {
+    local dir bin
+    dir=$(mktemp -d) || return 1
+    bin="$dir/cups-webui"
+    echo "[*] Downloading PaperCut CUPS web UI..."
+    if ! curl -fsSL -o "$bin" "$WEBUI_URL"; then
+        echo "[-] Download failed: $WEBUI_URL"
+        rm -rf "$dir"
+        return 1
+    fi
+    chmod +x "$bin"
+    xattr -d com.apple.quarantine "$bin" 2>/dev/null
+    echo "[+] Starting the web UI (runs as $USER; settings are saved to ~/.cups/lpoptions)."
+    echo "    Press CTRL-C to stop it and continue."
+    trap ':' INT    # let CTRL-C stop the web UI without aborting this script
+    "$bin" -open
+    trap - INT
+    rm -rf "$dir"
+    echo ""
+    echo "[+] Web UI stopped."
+}
+
+echo "PaperCut CUPS web UI (no sudo; saves to ~/.cups/lpoptions):"
+echo "  [1] Use it instead of this script"
+echo "  [2] Run it before this script"
+echo "  [3] Run it after this script"
+echo "  [4] Do not use it [Default]"
+echo ""
+read -p "Enter selection [4]: " WEBUI_IDX
+case "${WEBUI_IDX:-4}" in
+    1) WEBUI_MODE="instead" ;;
+    2) WEBUI_MODE="before" ;;
+    3) WEBUI_MODE="after" ;;
+    *) WEBUI_MODE="none" ;;
+esac
+echo ""
+
+case "$WEBUI_MODE" in
+    instead) run_webui || exit 1; exit 0 ;;
+    before)  run_webui || echo "[!] Continuing with this script." ; echo "" ;;
+esac
 
 # 1. DISCOVER AND SELECT PRINTER QUEUE
 echo "=================================================="
@@ -480,3 +532,5 @@ if [ "$APPLIED" -eq 1 ]; then
 else
     echo "[-] Nothing was applied."
 fi
+
+[ "$WEBUI_MODE" = "after" ] && { echo ""; run_webui; }
