@@ -271,10 +271,10 @@ PERL
 # ==============================================================================
 
 # select_queues: list the installed queues and read a comma-separated selection
-# (e.g. 1,3,4). Fills SEL_Q (queue names) and SEL_V (their detected vendors);
+# of numbers and ranges (e.g. 1-3,5,9-11). Fills SEL_Q (queue names) and SEL_V (their detected vendors);
 # unusable queues are reported and dropped.
 select_queues() {
-    local PRINTERS=() i p ok seen parts=() INPUT picked=()
+    local PRINTERS=() i p n lo hi ok seen parts=() INPUT picked=()
     IFS=$'\n' read -r -d '' -a PRINTERS < <(lpstat -p | awk '{print $2}' && printf '\0')
     if [ ${#PRINTERS[@]} -eq 0 ]; then
         echo "[-] No local printer queues discovered."
@@ -286,8 +286,8 @@ select_queues() {
         printf "  [%d] %s\n" "$((i+1))" "${PRINTERS[i]}"
     done
     echo ""
-    echo "Several queues can be configured with the same defaults at once,"
-    echo "e.g. 1,2,4 (they may use different drivers)."
+    echo "Several queues can be configured with the same defaults at once, using"
+    echo "numbers and/or ranges, e.g. 1-3,5,9-11 (they may use different drivers)."
     echo ""
 
     while true; do
@@ -297,18 +297,20 @@ select_queues() {
         [ -z "$INPUT" ] && ok=0
         IFS=',' read -r -a parts <<< "$INPUT"
         for p in "${parts[@]}"; do
-            if [[ "$p" =~ ^[0-9]+$ ]] && [ "$((10#$p))" -ge 1 ] && [ "$((10#$p))" -le "${#PRINTERS[@]}" ]; then
-                p=$((10#$p))
+            # each part is a single number (5) or an inclusive range (9-11)
+            if [[ "$p" =~ ^[0-9]+$ ]]; then lo=$((10#$p)); hi=$lo
+            elif [[ "$p" =~ ^([0-9]+)-([0-9]+)$ ]]; then lo=$((10#${BASH_REMATCH[1]})); hi=$((10#${BASH_REMATCH[2]}))
+            else ok=0; break; fi
+            if [ "$lo" -lt 1 ] || [ "$hi" -gt "${#PRINTERS[@]}" ] || [ "$lo" -gt "$hi" ]; then ok=0; break; fi
+            for ((n=lo; n<=hi; n++)); do
                 case "$seen" in
-                    *",$p,"*) ;;   # ignore duplicates
-                    *) seen="$seen$p,"; picked+=("${PRINTERS[$((p-1))]}") ;;
+                    *",$n,"*) ;;   # ignore duplicates
+                    *) seen="$seen$n,"; picked+=("${PRINTERS[$((n-1))]}") ;;
                 esac
-            else
-                ok=0; break
-            fi
+            done
         done
         [ "$ok" -eq 1 ] && [ ${#picked[@]} -gt 0 ] && break
-        echo "[-] Invalid selection. Use numbers from the list, separated by commas (e.g. 1,3)."
+        echo "[-] Invalid selection. Use numbers/ranges from the list, separated by commas (e.g. 1-3,5)."
     done
 
     SEL_Q=(); SEL_V=()

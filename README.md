@@ -18,7 +18,7 @@ chmod +x printdefaults.sh
 ./printdefaults.sh
 ```
 
-1. Pick one or more queues from the installed printers. Separate numbers with commas to give several queues the same defaults, e.g. `1,2,4`. The queues may use different drivers; the vendor is detected for each one.
+1. Pick one or more queues from the installed printers. Give several queues the same defaults by entering numbers and/or ranges separated by commas, e.g. `1,2,4` or `1-3,5,9-11`. The queues may use different drivers; the vendor is detected for each one.
 2. Choose **global** or **per user**.
 3. Choose layout and finishing options (applied to every selected queue).
 4. Answer `y` to "Enable job accounting?" if wanted, then enter a user code. You are asked once per driver vendor among the selected queues (for example once for the Kyocera queues and once for the Ricoh queues).
