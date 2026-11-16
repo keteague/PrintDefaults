@@ -57,19 +57,35 @@ run_webui() {
     echo "[+] Web UI stopped."
 }
 
-echo "PaperCut CUPS web UI (no sudo; saves to ~/.cups/lpoptions):"
-echo "  [1] Use it instead of this script"
-echo "  [2] Run it before this script"
-echo "  [3] Run it after this script"
-echo "  [4] Do not use it [Default]"
-echo ""
-read -p "Enter selection [4]: " WEBUI_IDX
-case "${WEBUI_IDX:-4}" in
-    1) WEBUI_MODE="instead" ;;
-    2) WEBUI_MODE="before" ;;
-    3) WEBUI_MODE="after" ;;
-    *) WEBUI_MODE="none" ;;
-esac
+# webui_reachable: quick HEAD request (follows redirects) so we only offer the
+# download when this Mac can actually reach it (no Internet, proxy or firewall
+# blocks would otherwise only show up after choosing the option).
+webui_reachable() {
+    curl -fsIL --connect-timeout 5 --max-time 10 -o /dev/null "$WEBUI_URL" 2>/dev/null
+}
+
+WEBUI_MODE="none"
+echo "[*] Checking whether the PaperCut CUPS web UI can be downloaded..."
+if webui_reachable; then
+    echo ""
+    echo "PaperCut CUPS web UI (no sudo; saves to ~/.cups/lpoptions):"
+    echo "  [1] Use it instead of this script"
+    echo "  [2] Run it before this script"
+    echo "  [3] Run it after this script"
+    echo "  [4] Do not use it [Default]"
+    echo ""
+    read -p "Enter selection [4]: " WEBUI_IDX
+    case "${WEBUI_IDX:-4}" in
+        1) WEBUI_MODE="instead" ;;
+        2) WEBUI_MODE="before" ;;
+        3) WEBUI_MODE="after" ;;
+        *) WEBUI_MODE="none" ;;
+    esac
+    echo ""
+else
+    echo "[i] PaperCut CUPS web UI is not reachable from this Mac (no Internet access?);"
+    echo "    skipping that option and using this script only."
+fi
 echo ""
 
 case "$WEBUI_MODE" in

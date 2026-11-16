@@ -53,7 +53,7 @@ In advanced mode, staple and punch show the chosen position/pattern (e.g. `Stapl
 
 ### PaperCut CUPS web UI (optional)
 
-The first prompt offers PaperCut's [cups-webui](https://github.com/PaperCutSoftware/cups-web-interface), a browser-based alternative to the CUPS page on `localhost:631`:
+The script first checks (a quick request to the download URL, about a second) that the binary can be reached. If this Mac has no Internet access, or a proxy/firewall blocks the download, the PaperCut question is skipped and only this script runs. Otherwise the first prompt offers PaperCut's [cups-webui](https://github.com/PaperCutSoftware/cups-web-interface), a browser-based alternative to the CUPS page on `localhost:631`:
 
 | Choice | Behavior |
 |---|---|
